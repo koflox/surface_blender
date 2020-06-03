@@ -24,12 +24,18 @@ abstract class EglCore(
     private var eglDisplay: EGLDisplay? = null
     private var eglContext: EGLContext? = null
     private var eglSurface: EGLSurface? = null
+
+    @Volatile
     private var isRunning = true
     private var lastFpsOutput: Long = 0
     private var fpsCounter = 0
 
     init {
-        thread { run() }
+        thread {
+            synchronized(EglCore::class.java) {
+                run()
+            }
+        }
     }
 
     private val config: EGLConfig? by lazy(LazyThreadSafetyMode.NONE) { getEglConfig() }
@@ -49,7 +55,7 @@ abstract class EglCore(
             if (onDraw()) {
                 EGL14.eglSwapBuffers(eglDisplay, eglSurface)
             }
-            val waitDelta = 16 - (System.currentTimeMillis() - loopStart) // Targeting 60 fps, no need for faster
+            val waitDelta = 16 - (System.currentTimeMillis() - loopStart)
             if (waitDelta > 0) {
                 try {
                     Thread.sleep(waitDelta)
@@ -95,7 +101,6 @@ abstract class EglCore(
         }
     }
 
-    @Synchronized
     private fun initEglCore() {
         eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
         val version = IntArray(2)
@@ -111,7 +116,6 @@ abstract class EglCore(
         }
     }
 
-    @Synchronized
     private fun releaseEglCore() {
         clearTexture()
         EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)

@@ -36,7 +36,6 @@ class TextureBlender(
     private var vpHeight = viewportHeight
     private var adjustViewport = false
 
-    @Synchronized
     override fun initGLES() {
         setupVertexBuffer()
         setupTexture()
@@ -46,7 +45,6 @@ class TextureBlender(
         onInitialized.invoke(videoTexture)
     }
 
-    @Synchronized
     override fun releaseGLES() {
         GLES32.glDeleteTextures(textures.size, textures.map(TextureGLES::handle).toIntArray(), 0)
         GLES32.glDeleteProgram(shaderProgram)
@@ -56,23 +54,27 @@ class TextureBlender(
 
     override fun onDraw(): Boolean {
         synchronized(this) {
-            frameAvailable = if (frameAvailable) {
-                videoTexture.updateTexImage()
-                videoTexture.getTransformMatrix(videoTextureTransform)
-                adjustBackgroundTexture()
-                false
-            } else {
-                return false
+            frameAvailable = when {
+                frameAvailable -> {
+                    videoTexture.updateTexImage()
+                    videoTexture.getTransformMatrix(videoTextureTransform)
+                    adjustBackgroundTexture()
+                    false
+                }
+                else -> return false
             }
         }
         if (adjustViewport) adjustViewport()
 
         GLES32.glUseProgram(shaderProgram)
 
-        val textureCoordinateHandle = GLES32.glGetAttribLocation(shaderProgram, VERTEX_TEXTURE_COORDINATE)
+        val textureCoordinateHandle =
+            GLES32.glGetAttribLocation(shaderProgram, VERTEX_TEXTURE_COORDINATE)
         val positionHandle = GLES32.glGetAttribLocation(shaderProgram, VERTEX_POSITION)
-        val textureTranformHandle = GLES32.glGetUniformLocation(shaderProgram, VERTEX_COORDINATE_MATRIX)
-        val backgroundTextureTransformHandle = GLES32.glGetUniformLocation(shaderProgram, SOURCE_COORDINATE_MATRIX)
+        val textureTranformHandle =
+            GLES32.glGetUniformLocation(shaderProgram, VERTEX_COORDINATE_MATRIX)
+        val backgroundTextureTransformHandle =
+            GLES32.glGetUniformLocation(shaderProgram, SOURCE_COORDINATE_MATRIX)
 
         GLES32.glEnableVertexAttribArray(positionHandle)
         GLES32.glVertexAttribPointer(positionHandle, 3, GLES32.GL_FLOAT, false, 4 * 3, vertexBuffer)
@@ -106,8 +108,14 @@ class TextureBlender(
         return true
     }
 
-    override fun onFrameAvailable(surfaceTexture: SurfaceTexture) {
-        synchronized(this) { frameAvailable = true }
+    override fun onFrameAvailable(surfaceTexture: SurfaceTexture) = synchronized(this) {
+        frameAvailable = true
+    }
+
+    fun setViewport(width: Int, height: Int) {
+        vpWidth = width
+        vpHeight = height
+        adjustViewport = true
     }
 
     private fun adjustBackgroundTexture() {
@@ -228,12 +236,6 @@ class TextureBlender(
     private fun adjustViewport() {
         GLES32.glViewport(0, 0, vpWidth, vpHeight)
         adjustViewport = false
-    }
-
-    fun setViewport(width: Int, height: Int) {
-        vpWidth = width
-        vpHeight = height
-        adjustViewport = true
     }
 
     private fun checkGlError(operation: String) {
