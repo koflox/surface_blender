@@ -56,6 +56,7 @@ class TextureBlender(
         synchronized(this) {
             frameAvailable = when {
                 frameAvailable -> {
+                    // update the texture image to the most recent frame from the image stream
                     videoTexture.updateTexImage()
                     videoTexture.getTransformMatrix(videoTextureTransform)
                     adjustBackgroundTexture()

@@ -4,6 +4,15 @@ import android.opengl.*
 import android.util.Log
 import kotlin.concurrent.thread
 
+/**
+ * EGL™ is an interface between Khronos rendering APIs such as OpenGL ES or OpenVG
+ * and the underlying native platform window system. It handles graphics context
+ * management, surface/buffer binding, and rendering synchronization and enables
+ * high-performance, accelerated, mixed-mode 2D and 3D rendering using other
+ * Khronos APIs.
+ *
+ * Documentation: https://www.khronos.org/registry/EGL/sdk/docs/man/
+ */
 abstract class EglCore(
     private val texture: Any
 ) : Runnable {
@@ -53,6 +62,7 @@ abstract class EglCore(
             val loopStart = System.currentTimeMillis()
             pingFps()
             if (onDraw()) {
+                // post EGL surface color buffer to a native window
                 EGL14.eglSwapBuffers(eglDisplay, eglSurface)
             }
             val waitDelta = 16 - (System.currentTimeMillis() - loopStart)
@@ -71,6 +81,9 @@ abstract class EglCore(
         isRunning = false
     }
 
+    /**
+     * Finds a suitable EGLConfig.
+     */
     private fun getEglConfig(): EGLConfig? {
         val renderType = EGL14.EGL_OPENGL_ES2_BIT or EGLExt.EGL_OPENGL_ES3_BIT_KHR
         val attrList = intArrayOf(
@@ -79,14 +92,14 @@ abstract class EglCore(
             EGL14.EGL_BLUE_SIZE, 8,
             EGL14.EGL_ALPHA_SIZE, 8,
             EGL14.EGL_RENDERABLE_TYPE, renderType,
-            EGL14.EGL_NONE, 0,
             EGL14.EGL_NONE
         )
+
+        // eglChooseConfig returns in configs a list of all EGL frame buffer configurations that match the attributes specified in attrib_list
         val configs = arrayOfNulls<EGLConfig>(1)
-        val numConfigs = IntArray(1)
         EGL14.eglChooseConfig(
             eglDisplay, attrList, 0, configs, 0, configs.size,
-            numConfigs, 0
+            intArrayOf(1), 0
         )
         return configs[0]
     }
@@ -101,16 +114,31 @@ abstract class EglCore(
         }
     }
 
+    /**
+     * Prepares EGL display and context.
+     */
     private fun initEglCore() {
+        // eglGetDisplay obtains the EGL display connection for the native display native_display.
         eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
+
+        // eglInitialize initialized the EGL display connection obtained with eglGetDisplay
+        // EGL_FALSE is returned if eglInitialize fails, EGL_TRUE otherwise
         val version = IntArray(2)
         EGL14.eglInitialize(eglDisplay, version, 0, version, 1)
-        eglContext = createContext(eglDisplay, config)
+
+
+        // eglCreateContext creates an EGL rendering context for the current rendering API
+        val attribList = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 3, EGL14.EGL_NONE)
+        eglContext = EGL14.eglCreateContext(eglDisplay, config, EGL14.EGL_NO_CONTEXT, attribList, 0)
+
+        // eglCreateWindowSurface creates an on-screen EGL window surface
         eglSurface = EGL14.eglCreateWindowSurface(eglDisplay, config, texture, intArrayOf(EGL14.EGL_NONE), 0)
 
         check(eglSurface != null && eglSurface != EGL14.EGL_NO_SURFACE) {
             "GL Error: ${GLUtils.getEGLErrorString(EGL14.eglGetError())}"
         }
+
+        // eglMakeCurrent binds context to the current rendering thread and to the draw and read surfaces.
         check(EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
             "GL Make current error: ${GLUtils.getEGLErrorString(EGL14.eglGetError())}"
         }
@@ -119,8 +147,16 @@ abstract class EglCore(
     private fun releaseEglCore() {
         clearTexture()
         EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+
+        // If the EGL surface surface is not current to any thread, eglDestroySurface destroys it immediately.
+        // Otherwise, surface is destroyed when it becomes not current to any thread
         EGL14.eglDestroySurface(eglDisplay, eglSurface)
+
+        // If the EGL rendering context context is not current to any thread, eglDestroyContext destroys it immediately.
+        // Otherwise, context is destroyed when it becomes not current to any thread.
         EGL14.eglDestroyContext(eglDisplay, eglContext)
+
+        // eglTerminate releases resources associated with an EGL display connection.
         EGL14.eglTerminate(eglDisplay)
     }
 
@@ -128,11 +164,6 @@ abstract class EglCore(
         GLES32.glClearColor(releaseColorRed, releaseColorGreen, releaseColorBlue, releaseColorAlpha)
         GLES32.glClear(GLES32.GL_COLOR_BUFFER_BIT)
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
-    }
-
-    private fun createContext(eglDisplay: EGLDisplay?, eglConfig: EGLConfig?): EGLContext {
-        val attribList = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 3, EGL14.EGL_NONE)
-        return EGL14.eglCreateContext(eglDisplay, eglConfig, EGL14.EGL_NO_CONTEXT, attribList, 0)
     }
 
     protected fun finalize() {
