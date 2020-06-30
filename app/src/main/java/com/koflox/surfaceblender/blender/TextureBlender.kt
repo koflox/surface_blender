@@ -12,15 +12,17 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.nio.ShortBuffer
+import kotlin.concurrent.thread
+import kotlin.math.max
 
-@Suppress("PrivatePropertyName")
 class TextureBlender(
-    texture: Any,
+    mode: EglCore.Mode,
+    window: Any,
     private val videoWidth: Int, private val videoHeight: Int,
     private val viewportWidth: Int, private val viewportHeight: Int,
     private val foreground: Bitmap, private val mask: Bitmap,
     private val onInitialized: (SurfaceTexture) -> Unit
-) : EglCore(texture), OnFrameAvailableListener {
+) : OnFrameAvailableListener {
 
     private val textures = mutableListOf<TextureGLES>()
 
@@ -36,7 +38,49 @@ class TextureBlender(
     private var vpHeight = viewportHeight
     private var adjustViewport = false
 
-    override fun initGLES() {
+    @Volatile
+    private var isRunning = true
+
+    init {
+        thread {
+            EglCore.initEglBundle(mode, window)
+            initGLES()
+            while (isRunning) {
+                EglCore.makeCurrent(mode)
+                val startTime = System.currentTimeMillis()
+                if (isDrawn()) EglCore.swapBuffers(mode)
+                when (mode) {
+                    EglCore.Mode.LIVE -> {
+                        val sleepTime = max(0, 16 - (System.currentTimeMillis() - startTime))
+                        Thread.sleep(sleepTime)
+                    }
+                    else -> {
+                    }
+                }
+            }
+            releaseGLES()
+            EglCore.releaseEglBundle(mode)
+        }
+    }
+
+    override fun onFrameAvailable(surfaceTexture: SurfaceTexture) = synchronized(this) {
+        frameAvailable = true
+    }
+
+    protected fun finalize() = release()
+
+    @Suppress("unused")
+    fun setViewport(width: Int, height: Int) {
+        vpWidth = width
+        vpHeight = height
+        adjustViewport = true
+    }
+
+    fun release() {
+        isRunning = false
+    }
+
+    private fun initGLES() {
         setupVertexBuffer()
         setupTexture()
         textures.add(TextureGLES(loadTexture(foreground), name = TEXTURE_FOREGROUND_NAME))
@@ -45,18 +89,17 @@ class TextureBlender(
         onInitialized.invoke(videoTexture)
     }
 
-    override fun releaseGLES() {
+    private fun releaseGLES() {
         GLES32.glDeleteTextures(textures.size, textures.map(TextureGLES::handle).toIntArray(), 0)
         GLES32.glDeleteProgram(shaderProgram)
         videoTexture.setOnFrameAvailableListener(null)
         videoTexture.release()
     }
 
-    override fun onDraw(): Boolean {
+    private fun isDrawn(): Boolean {
         synchronized(this) {
             frameAvailable = when {
                 frameAvailable -> {
-                    // update the texture image to the most recent frame from the image stream
                     videoTexture.updateTexImage()
                     videoTexture.getTransformMatrix(videoTextureTransform)
                     adjustBackgroundTexture()
@@ -96,7 +139,13 @@ class TextureBlender(
             textureBuffer
         )
         GLES32.glUniformMatrix4fv(textureTranformHandle, 1, false, videoTextureTransform, 0)
-        GLES32.glUniformMatrix4fv(backgroundTextureTransformHandle, 1, false, backgroundTextureTransformationMatrix.array, 0)
+        GLES32.glUniformMatrix4fv(
+            backgroundTextureTransformHandle,
+            1,
+            false,
+            backgroundTextureTransformationMatrix.array,
+            0
+        )
 
         GLES32.glDrawElements(
             GLES32.GL_TRIANGLES,
@@ -109,20 +158,13 @@ class TextureBlender(
         return true
     }
 
-    override fun onFrameAvailable(surfaceTexture: SurfaceTexture) = synchronized(this) {
-        frameAvailable = true
-    }
-
-    fun setViewport(width: Int, height: Int) {
-        vpWidth = width
-        vpHeight = height
-        adjustViewport = true
-    }
-
     private fun adjustBackgroundTexture() {
         System.arraycopy(
-            videoTextureTransform, 0,
-            backgroundTextureTransformationMatrix.array, 0, backgroundTextureTransformationMatrix.array.size
+            videoTextureTransform,
+            0,
+            backgroundTextureTransformationMatrix.array,
+            0,
+            backgroundTextureTransformationMatrix.array.size
         )
         backgroundTextureTransformationMatrix.apply {
             val videoAspectRatio = videoWidth.toFloat() / videoHeight
@@ -219,7 +261,12 @@ class TextureBlender(
             }
         }
 
-        textures.add(TextureGLES(target = GLES11Ext.GL_TEXTURE_EXTERNAL_OES, name = TEXTURE_SOURCE_NAME))
+        textures.add(
+            TextureGLES(
+                target = GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
+                name = TEXTURE_SOURCE_NAME
+            )
+        )
         val sourceTexture = textures.first()
 
         GLES32.glActiveTexture(GLES32.GL_TEXTURE0)
@@ -242,7 +289,7 @@ class TextureBlender(
     private fun checkGlError(operation: String) {
         GLES32.glGetError().let { error ->
             if (error != GLES32.GL_NO_ERROR) {
-                Log.e(TAG, "glError while $operation: ${GLUtils.getEGLErrorString(error)}")
+                Log.e(EglCore.TAG, "glError while $operation: ${GLUtils.getEGLErrorString(error)}")
             }
         }
     }
