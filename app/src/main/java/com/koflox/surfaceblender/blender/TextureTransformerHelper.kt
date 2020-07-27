@@ -1,15 +1,15 @@
 package com.koflox.surfaceblender.blender
 
-const val TEXTURE_SOURCE_NAME = "sTexture"
-const val TEXTURE_FOREGROUND_NAME = "sForeground"
-const val TEXTURE_MASK_NAME = "sMask"
+internal const val TEXTURE_SOURCE_NAME = "sTexture"
+internal const val TEXTURE_FOREGROUND_NAME = "sForeground"
+internal const val TEXTURE_MASK_NAME = "sMask"
 
-const val VERTEX_POSITION = "vPosition"
-const val VERTEX_TEXTURE_COORDINATE = "vTexCoordinate"
-const val VERTEX_COORDINATE_MATRIX = "uSTMatrix"
-const val SOURCE_COORDINATE_MATRIX = "sourceCoordinateMatrix"
+internal const val VERTEX_POSITION = "vPosition"
+internal const val VERTEX_TEXTURE_COORDINATE = "vTexCoordinate"
+internal const val VERTEX_COORDINATE_MATRIX = "uSTMatrix"
+internal const val SOURCE_COORDINATE_MATRIX = "sourceCoordinateMatrix"
 
-const val VERTEX_SHADER_CODE =
+internal const val VERTEX_SHADER_CODE =
     "#version 320 es\n" +
             "in vec2 $VERTEX_POSITION;" +
             "in vec2 $VERTEX_TEXTURE_COORDINATE;" +
@@ -23,7 +23,7 @@ const val VERTEX_SHADER_CODE =
             "gl_Position = vec4($VERTEX_POSITION, 0, 1);" +
             "}"
 
-const val FRAGMENT_SHADER_CODE =
+internal const val FRAGMENT_SHADER_CODE =
     "#version 320 es\n" +
             "#extension GL_OES_EGL_image_external_essl3 : require\n" +
             "" +
@@ -42,15 +42,15 @@ const val FRAGMENT_SHADER_CODE =
             "colorOut = vec4((foregroundColor + backgroundColor).rgb, 1.); " +
             "}"
 
-const val SQUARE_SIZE = 1.0f
-val SQUARE_COORDINATES = floatArrayOf(
+internal const val SQUARE_SIZE = 1.0f
+internal val SQUARE_COORDINATES = floatArrayOf(
     -SQUARE_SIZE, SQUARE_SIZE, 0.0f,
     -SQUARE_SIZE, -SQUARE_SIZE, 0.0f,
     SQUARE_SIZE, -SQUARE_SIZE, 0.0f,
     SQUARE_SIZE, SQUARE_SIZE, 0.0f
 )
-val DRAW_ORDER = shortArrayOf(0, 1, 2, 0, 2, 3)
-val TEXTURE_COORDINATES = floatArrayOf(
+internal val DRAW_ORDER = shortArrayOf(0, 1, 2, 0, 2, 3)
+internal val TEXTURE_COORDINATES = floatArrayOf(
     0.0f, 1.0f, 0.0f, 1.0f,
     0.0f, 0.0f, 0.0f, 1.0f,
     1.0f, 0.0f, 0.0f, 1.0f,

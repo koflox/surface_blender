@@ -2,27 +2,53 @@ package com.koflox.surfaceblender.blender
 
 import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
-import android.graphics.SurfaceTexture.OnFrameAvailableListener
 import android.opengl.GLES11Ext
 import android.opengl.GLES32
 import android.opengl.GLUtils
 import android.renderscript.Matrix4f
 import android.util.Log
+import com.koflox.surfaceblender.debugLog
+import com.koflox.surfaceblender.egl.EglCore
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.nio.ShortBuffer
+import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.thread
-import kotlin.math.max
+import kotlin.concurrent.withLock
 
-class TextureBlender(
+/**
+ * Displays a foreground bitmap on video stream using supplied mask cropping video frame.
+ *
+ * @param mode defines whether drawing is done as fast as possible (RECORDING) or keeps 60 fps (LIVE)
+ * @param window Surface, SurfaceView, SurfaceTexture or SurfaceHolder
+ * @param data video params, foreground, mask etc.
+ * @param viewportWidth viewport width for GL
+ * @param viewportHeight viewport height for GL
+ */
+class TextureTransformer(
     mode: EglCore.Mode,
     window: Any,
-    private val videoWidth: Int, private val videoHeight: Int,
-    private val viewportWidth: Int, private val viewportHeight: Int,
-    private val foreground: Bitmap, private val mask: Bitmap,
-    private val onInitialized: (SurfaceTexture) -> Unit
-) : OnFrameAvailableListener {
+    private val data: TransformerData,
+    private val viewportWidth: Int,
+    private val viewportHeight: Int,
+    private val callback: TextureTransformerCallback
+) {
+
+    companion object {
+        val TAG = TextureTransformer::class.java.simpleName
+        private val lock = ReentrantLock()
+    }
+
+    interface TextureTransformerCallback {
+        fun onSurfaceTextureReady(surfaceTexture: SurfaceTexture)
+
+        @JvmDefault
+        fun onReadyRenderFrame() = Unit
+
+        @JvmDefault
+        fun onFrameRendered() = Unit
+    }
 
     private val textures = mutableListOf<TextureGLES>()
 
@@ -39,54 +65,46 @@ class TextureBlender(
     private var adjustViewport = false
 
     @Volatile
-    private var isRunning = true
+    internal var isRunning = true
+        private set
 
     init {
-        thread {
+        thread(name = "TextureTransformerThread") {
             EglCore.initEglBundle(mode, window)
             initGLES()
             while (isRunning) {
-                EglCore.makeCurrent(mode)
-                val startTime = System.currentTimeMillis()
-                if (isDrawn()) EglCore.swapBuffers(mode)
+                if (isDrawn()) {
+                    callback.onReadyRenderFrame()
+                    lock.withLock {
+                        EglCore.makeCurrent(mode)
+                        EglCore.swapBuffers(mode)
+                    }
+                    callback.onFrameRendered()
+                }
                 when (mode) {
-                    EglCore.Mode.LIVE -> {
-                        val sleepTime = max(0, 16 - (System.currentTimeMillis() - startTime))
-                        Thread.sleep(sleepTime)
-                    }
-                    else -> {
-                    }
+                    EglCore.Mode.LIVE -> Thread.sleep(16)
+                    EglCore.Mode.RECORDING -> Unit
                 }
             }
             releaseGLES()
             EglCore.releaseEglBundle(mode)
+            debugLog(TAG, "Release TextureTransformer")
         }
-    }
-
-    override fun onFrameAvailable(surfaceTexture: SurfaceTexture) = synchronized(this) {
-        frameAvailable = true
-    }
-
-    protected fun finalize() = release()
-
-    @Suppress("unused")
-    fun setViewport(width: Int, height: Int) {
-        vpWidth = width
-        vpHeight = height
-        adjustViewport = true
     }
 
     fun release() {
         isRunning = false
     }
 
+    protected fun finalize() = release()
+
     private fun initGLES() {
         setupVertexBuffer()
         setupTexture()
-        textures.add(TextureGLES(loadTexture(foreground), name = TEXTURE_FOREGROUND_NAME))
-        textures.add(TextureGLES(loadTexture(mask), name = TEXTURE_MASK_NAME))
+        textures.add(TextureGLES(loadTexture(data.foreground), name = TEXTURE_FOREGROUND_NAME))
+        textures.add(TextureGLES(loadTexture(data.mask), name = TEXTURE_MASK_NAME))
         loadShaders()
-        onInitialized.invoke(videoTexture)
+        callback.onSurfaceTextureReady(videoTexture)
     }
 
     private fun releaseGLES() {
@@ -167,20 +185,25 @@ class TextureBlender(
             backgroundTextureTransformationMatrix.array.size
         )
         backgroundTextureTransformationMatrix.apply {
-            val videoAspectRatio = videoWidth.toFloat() / videoHeight
-            val viewportAspectRatio = viewportWidth.toFloat() / viewportHeight
+            val videoAspectRatio = data.videoWidth.toFloat() / data.videoHeight
+            val skyHeight = viewportHeight * (1 - data.bottomPadding)
+            val roiAspectRatio = viewportWidth.toFloat() / skyHeight
             when {
-                videoAspectRatio > viewportAspectRatio -> {
-                    val videoDesiredWidth = viewportHeight * videoAspectRatio
-                    val dx = viewportWidth / videoDesiredWidth
-                    translate((1 - dx) / 2, 0F, 0F)
-                    scale(dx, 1F, 1F)
+                videoAspectRatio < roiAspectRatio -> { // cut height
+                    val videoDesiredHeight = viewportWidth * (data.videoHeight.toFloat() / data.videoWidth)
+                    val sy = viewportHeight / videoDesiredHeight
+                    val bottomPadding = data.bottomPadding * viewportHeight
+                    val dy = -bottomPadding / videoDesiredHeight
+                    translate(0F, dy, 0F)
+                    scale(1F, sy, 1F)
                 }
-                videoAspectRatio < viewportAspectRatio -> {
-                    val videoDesiredHeight = viewportWidth * (videoHeight.toFloat() / videoWidth)
-                    val dy = viewportHeight / videoDesiredHeight
-                    translate(0F, (1 - dy) / 2, 0F)
-                    scale(1F, dy, 1F)
+                else -> { // cut width
+                    val videoDesiredWidth = skyHeight * videoAspectRatio
+                    val sy = viewportHeight / skyHeight
+                    val dx = viewportWidth / videoDesiredWidth
+                    val dy = -data.bottomPadding * sy
+                    translate((1 - dx) / 2, dy, 0F)
+                    scale(dx, sy, 1F)
                 }
             }
         }
@@ -277,7 +300,11 @@ class TextureBlender(
         checkGlError("bind source texture")
 
         videoTexture = SurfaceTexture(sourceTexture.handle).apply {
-            setOnFrameAvailableListener(this@TextureBlender)
+            setOnFrameAvailableListener {
+                synchronized(this@TextureTransformer) {
+                    frameAvailable = true
+                }
+            }
         }
     }
 
