@@ -1,1 +1,1 @@
-SurfaceBlender displays a foreground bitmap on video playback using supplied mask and cropping video frame to foreground's aspect ratio
+Synchronized decoder/surface_transformer/encoder with EGL/OpenGL/MediaCodec
