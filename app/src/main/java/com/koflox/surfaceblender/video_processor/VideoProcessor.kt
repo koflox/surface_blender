@@ -57,7 +57,6 @@ internal class VideoProcessor private constructor(
             callback?.onFailed()
             releaseAllModules()
         }
-
     }
 
     private val transformerCallback = object : TextureTransformer.TextureTransformerCallback {
@@ -65,16 +64,8 @@ internal class VideoProcessor private constructor(
             decoder.start(Surface(surfaceTexture), videoDecoderCallback)
         }
 
-        override fun onReadyRenderFrame() {
-            when (textureTransformer?.isRunning) {
-                false -> Unit
-                else -> phaser.waitRenderingAllowed()
-            }
-        }
-
         override fun onFrameRendered() {
             debugLog(TAG, "onFrameRendered")
-            phaser.nextPhase()
             encoder?.frameAvailableSoon()
         }
     }

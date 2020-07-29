@@ -20,7 +20,7 @@ import kotlin.concurrent.withLock
 /**
  * Displays a foreground bitmap on video stream using supplied mask cropping video frame.
  *
- * @param mode defines whether drawing is done as fast as possible (RECORDING) or keeps 60 fps (LIVE)
+ * @param mode is used to distinguish surfaces, currently only one mode specific surface can be created
  * @param window Surface, SurfaceView, SurfaceTexture or SurfaceHolder
  * @param data video params, foreground, mask etc.
  * @param viewportWidth viewport width for GL
@@ -80,10 +80,6 @@ class TextureTransformer(
                         EglCore.swapBuffers(mode)
                     }
                     callback.onFrameRendered()
-                }
-                when (mode) {
-                    EglCore.Mode.LIVE -> Thread.sleep(16)
-                    EglCore.Mode.RECORDING -> Unit
                 }
             }
             releaseGLES()
