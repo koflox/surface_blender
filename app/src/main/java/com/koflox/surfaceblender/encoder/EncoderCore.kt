@@ -1,20 +1,14 @@
-@file:Suppress("ConstantConditionIf")
-
 package com.koflox.surfaceblender.encoder
 
 import android.media.MediaCodec
-import android.media.MediaCodecInfo
-import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
-import android.util.Size
 import android.view.Surface
 import com.koflox.surfaceblender.debugLog
 import java.io.File
 import java.io.IOException
-import kotlin.math.max
 
 /**
  * This class wraps up the core components used for surface-input video encoding.
@@ -32,7 +26,7 @@ internal class VideoEncoderCore
 /**
  * Configures encoder and muxer state, and prepares the input Surface.
  */
-@Throws(IOException::class)
+@Throws(IOException::class, IllegalArgumentException::class)
 constructor(reusableSurface: Surface?, width: Int, height: Int, bitRate: Int, private val frameRate: Int, outputFile: File) {
 
     /**
@@ -46,28 +40,8 @@ constructor(reusableSurface: Surface?, width: Int, height: Int, bitRate: Int, pr
     private var mMuxerStarted: Boolean = false
     private var encodedFrameIndex = 0
 
-
     init {
-
-        val supportedSize = getSupportedSize(width, height)
-        val format = MediaFormat.createVideoFormat(
-            MIME_TYPE,
-            supportedSize.width,
-            supportedSize.height
-        )
-
-        // Set some properties.  Failing to specify some of these can cause the MediaCodec
-        // configure() call to throw an unhelpful exception.
-        format.setInteger(
-            MediaFormat.KEY_COLOR_FORMAT,
-            MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
-        )
-        format.setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
-        format.setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-        format.setInteger(
-            MediaFormat.KEY_I_FRAME_INTERVAL,
-            I_FRAME_INTERVAL
-        )
+        val format = createMediaFormat(MIME_TYPE, width, height, bitRate, frameRate, I_FRAME_INTERVAL)
         debugLog(TAG, "format: $format")
 
         // Create a MediaCodec encoder, and configure it with our format.  Get a Surface
@@ -207,39 +181,12 @@ constructor(reusableSurface: Surface?, width: Int, height: Int, bitRate: Int, pr
         return encodedFrameIndex
     }
 
-    private fun getSupportedSize(w: Int, h: Int): Size {
-        val maxDimension = max(w, h)
-        return when {
-            maxDimension > MAX_OUTPUT_DIMENSION -> {
-                val aspectRatio = w.toFloat() / h
-                when (maxDimension) {
-                    w -> {
-                        Size(MAX_OUTPUT_DIMENSION, (MAX_OUTPUT_DIMENSION / aspectRatio).toInt())
-                    }
-                    else -> Size(
-                        (MAX_OUTPUT_DIMENSION / aspectRatio).toInt(),
-                        MAX_OUTPUT_DIMENSION
-                    )
-                }
-            }
-            else -> Size(w.toCodecSupportedDimension(), h.toCodecSupportedDimension())
-        }
-
-    }
-
-    private fun Int.toCodecSupportedDimension() = when {
-        this % 16 == 0 -> this
-        else -> this / 16 * 16
-    }
-
     companion object {
         private const val TAG = "VideoEncoder"
 
         private const val TIMEOUT_USEC = 10000
         private const val MIME_TYPE = "video/avc"    // H.264 Advanced Video Coding
         private const val I_FRAME_INTERVAL = 10           // 5 seconds between I-frames
-
-        private const val MAX_OUTPUT_DIMENSION = 3840
     }
 }
 
@@ -316,6 +263,7 @@ internal class Encoder(
                     callback.onEncoderSurfaceReady(inputSurface)
                 }
             } catch (ex: Exception) {
+                debugLog(TAG, "Encoder cannot be configured", ex)
                 callback.onEncodingFailed()
                 release()
             }

@@ -52,6 +52,7 @@ internal class Decoder {
         handler.post {
             this.callback = callback
             val (mimeType, mediaFormat) = getVideoInfo() ?: kotlin.run {
+                debugLog(TAG, "file doesn't contain any video")
                 callback?.onDecodingFailed()
                 release()
                 return@post
